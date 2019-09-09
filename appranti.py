@@ -1,13 +1,22 @@
-from multiprocessing import freeze_support
 import tensorflow as tf
+from loguru import logger
+import sys
+import os
+from pathlib import Path
+from multiprocessing import freeze_support
 
-"""
-# Model Architecture
-#### Custom function for conv2d: conv_block
-"""
+import luccauchon.data.__MYENV__ as E
+import logging
+E.APPLICATION_LOG_LEVEL = logging.INFO
+from luccauchon.data.Generators import COCODataFrameDataGenerator
 
 
 def conv_block(inputs, conv_type, kernel, kernel_size, strides, padding='same', relu=True):
+    """
+    # Model Architecture
+    #### Custom function for conv2d: conv_block
+    """
+
     if conv_type == 'ds':
         x = tf.keras.layers.SeparableConv2D(kernel, kernel_size, padding=padding, strides=strides)(inputs)
     else:
@@ -22,6 +31,7 @@ def conv_block(inputs, conv_type, kernel, kernel_size, strides, padding='same', 
 
 
 def _res_bottleneck(inputs, filters, kernel, t, s, r=False):
+    """#### residual custom method"""
     tchannel = tf.keras.backend.int_shape(inputs)[-1] * t
 
     x = conv_block(inputs, 'conv', tchannel, (1, 1), strides=(1, 1))
@@ -65,22 +75,16 @@ def pyramid_pooling_block(input_tensor, bin_sizes):
     return tf.keras.layers.concatenate(concat_list)
 
 
-def build_net():
-    """## Step 1: Learning to DownSample"""
-
+def build_net(img_h, img_w, c):
     # Input Layer
-    input_layer = tf.keras.layers.Input(shape=(2048, 1024, 3), name='input_layer')
+    input_layer = tf.keras.layers.Input(shape=(img_h, img_w, c), name='input_layer')
 
+    """## Step 1: Learning to DownSample"""
     lds_layer = conv_block(input_layer, 'conv', 32, (3, 3), strides=(2, 2))
     lds_layer = conv_block(lds_layer, 'ds', 48, (3, 3), strides=(2, 2))
     lds_layer = conv_block(lds_layer, 'ds', 64, (3, 3), strides=(2, 2))
 
-    """## Step 2: Global Feature Extractor
-
-    #### residual custom method
-    """
-
-    """#### Assembling all the methods"""
+    """## Step 2: Global Feature Extractor"""
     gfe_layer = bottleneck_block(lds_layer, 64, (3, 3), t=6, strides=2, n=3)
     gfe_layer = bottleneck_block(gfe_layer, 96, (3, 3), t=6, strides=2, n=3)
     gfe_layer = bottleneck_block(gfe_layer, 128, (3, 3), t=6, strides=1, n=3)
@@ -121,14 +125,27 @@ def build_net():
 
 
 def start(args):
-    fast_scnn = build_net()
+    logger.debug('Using conda env: ' + str(Path(sys.executable).as_posix().split('/')[-3]) + ' [' + str(Path(sys.executable).as_posix()) + ']')
+
+    if os.name is not 'nt':
+        data_dir_source_coco = '/gpfs/home/cj3272/56/APPRANTI/cj3272/dataset/coco/'
+    else:
+        data_dir_source_coco = 'F:/APPRANTI/dataset/Dataset_COCO_Appranti_80_20__[1]/'
+    img_h = 1024
+    img_w = 2048
+    c = 3
+    batch_size = 4
+
+    fast_scnn = build_net(img_h, img_w, c)
 
     optimizer = tf.keras.optimizers.SGD(momentum=0.9, lr=0.045)
     fast_scnn.compile(loss='categorical_crossentropy', optimizer=optimizer, metrics=['accuracy'])
 
-    fast_scnn.summary()
+    # fast_scnn.summary()
+    # tf.keras.utils.plot_model(fast_scnn, show_layer_names=True, show_shapes=True)
 
-    tf.keras.utils.plot_model(fast_scnn, show_layer_names=True, show_shapes=True)
+    train_generator = COCODataFrameDataGenerator(data_dir_source_coco=data_dir_source_coco, batch_size=batch_size, img_h=img_h, img_w=img_w, c=c, data_type_source_coco='train2019')
+    val_generator = COCODataFrameDataGenerator(data_dir_source_coco=data_dir_source_coco, batch_size=batch_size, img_h=img_h, img_w=img_w, c=c, data_type_source_coco='val2019')
 
 
 if __name__ == '__main__':
